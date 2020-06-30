@@ -7,30 +7,29 @@ import (
 
 // Logger - basic logging interface
 type Logger interface {
-	Info(string, ...interface{}) (int, error)
-	Verbose(string, ...interface{}) (int, error)
-	Debug(string, ...interface{}) (int, error)
+	Info(string, ...interface{})
+	Verbose(string, ...interface{})
+	Debug(string, ...interface{})
 }
 
 type printfLogger struct {
 	Verbosity int
 }
 
-func (p printfLogger) log(lvl int, f string, a ...interface{}) (int, error) {
+func (p printfLogger) log(lvl int, f string, a ...interface{}) {
 	if p.Verbosity >= lvl {
-		return fmt.Fprintf(os.Stderr, f+"\n", a...)
+		fmt.Fprintf(os.Stderr, f+"\n", a...)
 	}
-	return 0, nil
 }
 
-func (p printfLogger) Info(fmt string, a ...interface{}) (int, error) {
-	return p.log(1, fmt, a...)
+func (p printfLogger) Info(fmt string, a ...interface{}) {
+	p.log(1, fmt, a...)
 }
 
-func (p printfLogger) Verbose(fmt string, a ...interface{}) (int, error) {
-	return p.log(2, fmt, a...)
+func (p printfLogger) Verbose(fmt string, a ...interface{}) {
+	p.log(2, fmt, a...)
 }
 
-func (p printfLogger) Debug(fmt string, a ...interface{}) (int, error) {
-	return p.log(3, fmt, a...)
+func (p printfLogger) Debug(fmt string, a ...interface{}) {
+	p.log(3, fmt, a...)
 }

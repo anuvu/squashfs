@@ -56,7 +56,6 @@ func (s *SquashFs) Free() {
 
 func (s *SquashFs) Close() {
 	// TODO: implement
-	return
 }
 
 func (s *SquashFs) OpenFile(name string) (*File, error) {

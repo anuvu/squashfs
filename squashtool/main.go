@@ -205,27 +205,34 @@ func (e *Extractor) extractCharDevice(path string, info squashfs.FileInfo) error
 }
 
 func (e *Extractor) extractRegular(path string, info squashfs.FileInfo) error {
+	var finalError, cleanupError error
 	targetPath := filepath.Join(e.Dir, path)
 	cleanup, err := prepWrite(targetPath, info)
 
-	if err != nil {
-		return err
+	if err == nil {
+		if writeFp, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY, DefaultFilePerm); err == nil {
+			defer writeFp.Close()
+			if written, err := io.Copy(writeFp, info.File); err == nil {
+				if written != info.FSize {
+					finalError = fmt.Errorf("wrote %d bytes to %s. expected %d from %s",
+						written, targetPath, info.FSize, path)
+				}
+			}
+		} else {
+			finalError = err
+		}
+	} else {
+		finalError = err
 	}
-	defer cleanup()
 
-	writeFp, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY, DefaultFilePerm)
-	if err != nil {
-		return err
+	cleanupError = cleanup()
+	if finalError != nil {
+		// there was an error before cleanup, so log the cleanup error, return the real error.
+		e.Logger.Info("prepWrite cleanup for %s failed: %s", targetPath, cleanupError)
+	} else {
+		finalError = cleanupError
 	}
-	defer writeFp.Close()
-
-	e.Logger.Debug("file: %s", path)
-	if written, err := io.Copy(writeFp, info.File); err != nil {
-		return err
-	} else if written != info.FSize {
-		return fmt.Errorf("wrote %d bytes to %s. expected %d from %s", written, targetPath, info.FSize, path)
-	}
-	return nil
+	return finalError
 }
 
 func (e *Extractor) extractIrregular(path string, info squashfs.FileInfo) error {
@@ -255,13 +262,20 @@ func (e *Extractor) applyWhiteOut(path string, whiteOut string) error {
 
 // doCreate - prep writing of fInfo to path, and then call creator.
 func doCreate(path string, fInfo squashfs.FileInfo, creator func() error) error {
+	var createError, cleanupError error
 	cleanup, err := prepWrite(path, fInfo)
-	defer cleanup()
 	if err != nil {
-		return err
+		createError = creator()
+	}
+	cleanupError = cleanup()
+
+	if cleanupError != nil {
+		if createError == nil {
+			return cleanupError
+		}
 	}
 
-	return creator()
+	return createError
 }
 
 // prepWrite - prepare to write to path
@@ -499,6 +513,9 @@ func testMain(c *cli.Context) error {
 	}
 	fmt.Printf("has entries: %v\n", names)
 	names, err = f.Readdirnames(1)
+	if err != nil {
+		return fmt.Errorf("error with readdirnames(1)")
+	}
 	fmt.Printf("has entries: %v\n", names)
 	f.Close()
 
