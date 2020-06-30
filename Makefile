@@ -1,0 +1,34 @@
+VERSION := $(shell x=$$(git describe --tags --long 2>/dev/null) && echo $${x\#v} || echo unknown)
+VERSION_SUFFIX := $(shell [ -z "$$(git status --porcelain --untracked-files=no 2>/dev/null)" ] || echo -dirty)
+VERSION_FULL := $(VERSION)$(VERSION_SUFFIX)
+BUILD_FLAGS := -ldflags "-X main.version=$(VERSION_FULL)"
+ROOTCMD := $(shell [ `id -u` = 0 ] && exit 0; command -v fakeroot 2>/dev/null || echo sudo)
+GO_LIB_FILES := $(wildcard *.go)
+GO_TOOL_FILES := $(wildcard squashtool/*.go)
+SQUASHTOOL := squashtool/squashtool
+
+all: $(SQUASHTOOL)
+
+static: $(SQUASHTOOL).static
+
+$(SQUASHTOOL): $(GO_LIB_FILES) $(GO_TOOL_FILES)
+	cd $(dir $@) && go build -o $(notdir $@) $(BUILD_FLAGS) ./...
+
+$(SQUASHTOOL).static: $(GO_LIB_FILES) $(GO_TOOL_FILES)
+	cd $(dir $@) && go build -o $(notdir $@) $(BUILD_FLAGS) -ldflags '-extldflags "-lzstd -lz -llzma -llz4 -static"' ./...
+
+test: $(SQUASHTOOL) images
+	./$(SQUASHTOOL) test-main noroot.squashfs
+
+images: $(SQUASHFS_IMAGES)
+
+noroot.squashfs: make-test-squashfs
+	./make-test-squashfs $@
+
+root.squashfs: make-test-squashfs
+	$(ROOTCMD) ./make-test-squashfs $@
+
+clean:
+	rm -f $(SQUASHTOOL) $(SQUASHTOOL).static $(SQUASHFS_IMAGES)
+
+.PHONY: static all images

@@ -1,0 +1,108 @@
+#!/bin/bash
+TEMP_D=""
+fail() { echo "$@" 1>&2; exit 1; }
+
+
+cleanup() {
+    if [ -d "$TEMP_D" ]; then
+        find "$TEMP_D" -type d -exec chmod "u+w" "{}" "+"
+        rm -Rf "$TEMP_D"
+    fi
+}
+
+make_socket() {
+    local python
+    if command -v python3 >/dev/null; then
+        python=python3
+    elif command -v python >/dev/null; then
+        python=python
+    else
+        fail "install python 2 or 3 somewhere in path"
+    fi
+
+    $python -c "
+import socket, sys
+sock = socket.socket(socket.AF_UNIX).bind(sys.argv[1])" "$1"
+}
+
+amroot=false
+if [ "$(id -u)" = "0" ]; then
+    # root, we can do other stuff.
+    amroot=true
+fi
+outfile=${1:-my.squashfs}
+
+TEMP_D=$(mktemp -d) || fail
+trap cleanup EXIT
+
+mydir=$(dirname "$0") || fail
+mydir=$(cd "$mydir" && pwd) || fail
+start_d=${PWD}
+
+cd "${TEMP_D}"
+
+cp "${mydir}"/README.md . || fail
+mkdir my.d || fail
+
+cd my.d
+echo "hello world" > file.txt
+go help build > go-help-build.out
+touch --date="14 Jun 2003 16:00:00 -0400" old-file.txt
+
+cd .. || fail
+mkdir my-bin || fail
+cat >my-bin/hello <<EOF
+#!/bin/sh
+echo hello world
+EOF
+chmod 755 my-bin/hello
+
+mkdir dir2 || fail
+( set -e
+    cd dir2
+    ln -s ../my-bin       dir-symlink
+    ln -s ../no-such-file dangling-symlink
+    ln -s ../README.md    file-symlink.txt
+    ln    ../README.md    file-hardlink
+) || fail
+
+mkdir perms
+echo "can you read this?" > perms/no-read-000.txt
+chmod 000 perms/no-read-000.txt
+
+echo "perms-664" > perms/file-664
+chmod 664 perms/file-664
+
+echo "perms-4755" > perms/file-4755
+chmod 4755 perms/file-4755
+
+mkdir perms/no-write.d
+touch perms/no-write.d/file.txt
+chmod 555 perms/no-write.d
+
+#mkdir perms/no-read.d
+#touch perms/no-read.d/file.txt
+#chmod 000 perms/no-read.d
+
+if $amroot; then
+    mkdir dev
+    mknod dev/char-dev-null    c 1 3
+    mknod dev/block-dev-sda    b 8 0
+    mknod dev/fifo             p
+
+    touch perms/file1.txt
+    chown 9999:8888 perms/file1.txt
+
+    make_socket mysocket.0 || fail
+
+    # this is a overlayfs whiteout file.
+    mknod file2.txt c 0 0
+    mknod dir2/overlayfs-whiteout.txt c 0 0
+fi
+
+cd "${mydir}"
+rm -f "$outfile"
+out=$(mksquashfs "${TEMP_D}/" "$outfile" -comp xz 2>&1) || {
+    fail "failed mksquashfs: $out"
+}
+exit 0
