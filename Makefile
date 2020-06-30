@@ -6,6 +6,7 @@ ROOTCMD := $(shell [ `id -u` = 0 ] && exit 0; command -v fakeroot 2>/dev/null ||
 GO_LIB_FILES := $(wildcard *.go)
 GO_TOOL_FILES := $(wildcard squashtool/*.go)
 SQUASHTOOL := squashtool/squashtool
+SQUASHFS_IMAGES := noroot.squashfs root.squashfs
 
 all: $(SQUASHTOOL)
 
