@@ -39,7 +39,8 @@ mydir=$(dirname "$0") || fail
 mydir=$(cd "$mydir" && pwd) || fail
 start_d=${PWD}
 
-cd "${TEMP_D}"
+mkdir "${TEMP_D}/fsroot" || fail
+cd "${TEMP_D}/fsroot"
 
 cp "${mydir}"/README.md . || fail
 mkdir my.d || fail
@@ -100,9 +101,19 @@ if $amroot; then
     mknod dir2/overlayfs-whiteout.txt c 0 0
 fi
 
-cd "${mydir}"
-rm -f "$outfile"
-out=$(mksquashfs "${TEMP_D}/" "$outfile" -comp xz 2>&1) || {
+out=$(mksquashfs "${TEMP_D}/fsroot" "${TEMP_D}/squashfs.img" -comp xz 2>&1) || {
     fail "failed mksquashfs: $out"
 }
+
+cd "${start_d}"
+rm -f "$outfile" || fail "failed to remove $outfile"
+if [ -n "$SUDO_USER" -a "$(id -u)" = "0" ]; then
+    # some systems you can't write files as root to HOME.
+    sudo "--user=$SUDO_USER" tee "$outfile" >/dev/null < "$TEMP_D/squashfs.img" ||
+        fail "failed to write file as $SUDO_USER via tee"
+else
+    cp "${TEMP_D}/squashfs.img" "$outfile" ||
+        fail "failed cp <tmpdir>/squashfs.img $outfile"
+fi
+
 exit 0
