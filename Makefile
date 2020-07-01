@@ -2,7 +2,7 @@ VERSION := $(shell x=$$(git describe --tags --long 2>/dev/null) && echo $${x\#v}
 VERSION_SUFFIX := $(shell [ -z "$$(git status --porcelain --untracked-files=no 2>/dev/null)" ] || echo -dirty)
 VERSION_FULL := $(VERSION)$(VERSION_SUFFIX)
 BUILD_FLAGS := -ldflags "-X main.version=$(VERSION_FULL)"
-ROOTCMD := $(shell [ `id -u` = 0 ] && exit 0; command -v fakeroot 2>/dev/null || echo sudo)
+ROOTCMD ?= $(shell [ `id -u` = 0 ] && exit 0; command -v fakeroot 2>/dev/null || echo sudo)
 GO_LIB_FILES := $(wildcard *.go)
 GO_TOOL_FILES := $(wildcard squashtool/*.go)
 SQUASHTOOL := squashtool/squashtool
