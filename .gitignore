@@ -1,3 +1,4 @@
 *.squashfs
 tags
 squashtool/squashtool
+.build

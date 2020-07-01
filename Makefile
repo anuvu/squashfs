@@ -8,9 +8,13 @@ GO_TOOL_FILES := $(wildcard squashtool/*.go)
 SQUASHTOOL := squashtool/squashtool
 SQUASHFS_IMAGES := noroot.squashfs root.squashfs
 
-all: $(SQUASHTOOL)
+all: .build $(SQUASHTOOL)
 
 static: $(SQUASHTOOL).static
+
+.build: $(GO_LIB_FILES)
+	go build ./...
+	@touch "$@"
 
 $(SQUASHTOOL): $(GO_LIB_FILES) $(GO_TOOL_FILES)
 	cd $(dir $@) && go build -o $(notdir $@) $(BUILD_FLAGS) ./...
@@ -30,6 +34,6 @@ root.squashfs: make-test-squashfs
 	$(ROOTCMD) ./make-test-squashfs $@
 
 clean:
-	rm -f $(SQUASHTOOL) $(SQUASHTOOL).static $(SQUASHFS_IMAGES)
+	rm -f $(SQUASHTOOL) $(SQUASHTOOL).static $(SQUASHFS_IMAGES) .build
 
 .PHONY: static all images
