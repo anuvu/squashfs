@@ -75,7 +75,6 @@ func (s *SquashFs) Stat(name string) (FileInfo, error) {
 func (s *SquashFs) Lstat(name string) (FileInfo, error) {
 	f, err := s.OpenFile(name)
 	if err != nil {
-		fmt.Printf("s.OpenFile(%s) failed: %s\n", name, err)
 		return FileInfo{}, err
 	}
 	return f.Lstat()
@@ -106,7 +105,6 @@ func walk(path string, info FileInfo, walkFn WalkFunc) error {
 	sqfs := info.File.SquashFs
 
 	names, err := info.File.Readdirnames(0)
-	fmt.Printf("%s has %v\n", path, names)
 	err1 := walkFn(path, info, err)
 	// If err != nil, walk can't walk into this directory.
 	// err1 != nil means walkFn want walk to skip this directory or stop walking.
@@ -116,7 +114,6 @@ func walk(path string, info FileInfo, walkFn WalkFunc) error {
 		// by walkFn. walkFn may ignore err and return nil.
 		// If walkFn returns SkipDir, it will be handled by the caller.
 		// So walk should return whatever walkFn returns.
-		fmt.Printf("err=%s err1=%s\n", err, err1)
 		return err1
 	}
 
@@ -124,7 +121,6 @@ func walk(path string, info FileInfo, walkFn WalkFunc) error {
 		filename := filepath.Join(path, name)
 		fileInfo, err := sqfs.Lstat(filename)
 		if err != nil {
-			fmt.Printf("lstat(%s) failed: %s\n", filename, err)
 			if err := walkFn(filename, fileInfo, err); err != nil && err != SkipDir {
 				return err
 			}
@@ -255,7 +251,6 @@ func (f FileInfo) Sys() interface{} {
 func (f FileInfo) String() string {
 	var sizeOrMajMin string
 
-	fmt.Printf("here on %s\n", f.Filename)
 	sys := f.Sys().(syscall.Stat_t)
 	name := f.Filename
 	if f.IsDir() && f.Filename != "/" {
@@ -299,7 +294,6 @@ func Open(name string, squash *SquashFs) (*File, error) {
 	}
 	f := File{Filename: name, SquashFs: squash, Pos: 0, size: -1}
 	if r := C.sqfs_dir_reader_find_by_path(squash.dirReader, squash.Root, C.CString(name), &inode); r != 0 {
-		fmt.Printf("returning not exist for name=%s got %d\n", name, r)
 		return &f, os.ErrNotExist
 	}
 	f.Inode = inode
@@ -463,7 +457,6 @@ func getFileInfo(f *File) (FileInfo, error) {
 		File:          f,
 		SymlinkTarget: inode.symlinkTarget(),
 	}
-	fmt.Printf("fInfo=%v\n", fInfo)
 	return fInfo, nil
 }
 

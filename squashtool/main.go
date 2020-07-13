@@ -523,7 +523,9 @@ func testMain(c *cli.Context) error {
 		return fmt.Errorf("failed to open /")
 	}
 	names, err = f.Readdirnames(0)
-	fmt.Printf("read (%s): %v\n", err, names)
+	if err != nil {
+		return fmt.Errorf("read returned %s: %v\n", err, names)
+	}
 
 	if f, err = squashfs.Open("/", &s); err != nil {
 		return fmt.Errorf("failed to open /")
