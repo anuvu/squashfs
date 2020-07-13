@@ -60,9 +60,9 @@ I'm assuming you have 'git'.  Get that with apt or yum.
 
  * install into mylocal="$HOME/lib"
 
-        $ mylocal="$HOME/lib"
+        $ mylocal="$HOME/mylocal"
         $ export LD_LIBRARY_PATH=$mylocal/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
-        $ export PKG_CONFIG_PATH=$mylocal/lib/pkgconfig:${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
+        $ export PKG_CONFIG_PATH=$mylocal/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}
 
  * build and install squashfs-tools-ng
 
