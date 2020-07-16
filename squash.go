@@ -41,8 +41,8 @@ var ErrNotImplemented = errors.New("not implemented")
 type SquashFs struct {
 	Filename   string
 	File       *C.sqfs_file_t
-	Super      C.sqfs_super_t
-	Config     C.sqfs_compressor_config_t
+	Super      *C.sqfs_super_t
+	Config     *C.sqfs_compressor_config_t
 	Compressor *C.sqfs_compressor_t
 	IDTable    *C.sqfs_id_table_t
 	dirReader  *C.sqfs_dir_reader_t
@@ -574,21 +574,23 @@ func (f *File) Sync() error {
 func OpenSquashfs(fname string) (SquashFs, error) {
 	var err error
 	sqfs := SquashFs{Filename: fname}
+	sqfs.Super = (*C.sqfs_super_t)(C.malloc(C.sizeof_sqfs_super_t))
+	sqfs.Config = (*C.sqfs_compressor_config_t)(C.malloc(C.sizeof_sqfs_compressor_config_t))
 
 	if sqfs.File, err = C.sqfs_open_file(C.CString(fname), C.SQFS_FILE_OPEN_READ_ONLY); err != nil {
 		sqfs.Free()
 		return SquashFs{}, fmt.Errorf("failed to open %s: %s", fname, err)
 	}
 
-	if _, err = C.sqfs_super_read(&sqfs.Super, sqfs.File); err != nil {
+	if _, err = C.sqfs_super_read(sqfs.Super, sqfs.File); err != nil {
 		sqfs.Free()
 		return SquashFs{}, fmt.Errorf("failed to open %s: %s", fname, err)
 	}
 
-	C.sqfs_compressor_config_init(&sqfs.Config, C.SQFS_COMPRESSOR(sqfs.Super.compression_id),
+	C.sqfs_compressor_config_init(sqfs.Config, C.SQFS_COMPRESSOR(sqfs.Super.compression_id),
 		C.ulong(sqfs.Super.block_size), C.SQFS_COMP_FLAG_UNCOMPRESS)
 
-	if r := C.sqfs_compressor_create(&sqfs.Config, &sqfs.Compressor); r != 0 {
+	if r := C.sqfs_compressor_create(sqfs.Config, &sqfs.Compressor); r != 0 {
 		sqfs.Free()
 		return sqfs, fmt.Errorf("error creating compressor: %d", r)
 	}
@@ -598,14 +600,14 @@ func OpenSquashfs(fname string) (SquashFs, error) {
 		return sqfs, fmt.Errorf("error creating id table: %d", err)
 	}
 
-	if r := C.sqfs_id_table_read(sqfs.IDTable, sqfs.File, &sqfs.Super, sqfs.Compressor); r != 0 {
+	if r := C.sqfs_id_table_read(sqfs.IDTable, sqfs.File, sqfs.Super, sqfs.Compressor); r != 0 {
 		sqfs.Free()
 		return sqfs, fmt.Errorf("error loading ID table")
 	}
 
 	/* create a directory reader and get the root inode */
 
-	sqfs.dirReader = C.sqfs_dir_reader_create(&sqfs.Super, sqfs.Compressor, sqfs.File, 0)
+	sqfs.dirReader = C.sqfs_dir_reader_create(sqfs.Super, sqfs.Compressor, sqfs.File, 0)
 	if sqfs.dirReader == nil {
 		sqfs.Free()
 		return sqfs, fmt.Errorf("error creating directory reader")
@@ -624,7 +626,7 @@ func OpenSquashfs(fname string) (SquashFs, error) {
 		return sqfs, fmt.Errorf("error creating data reader")
 	}
 
-	if r := C.sqfs_data_reader_load_fragment_table(sqfs.dataReader, &sqfs.Super); r != 0 {
+	if r := C.sqfs_data_reader_load_fragment_table(sqfs.dataReader, sqfs.Super); r != 0 {
 		sqfs.Free()
 		return sqfs, fmt.Errorf("error loading fragment table")
 	}
