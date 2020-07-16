@@ -40,14 +40,14 @@ var ErrNotImplemented = errors.New("not implemented")
 
 type SquashFs struct {
 	Filename   string
-	File       *C.sqfs_file_t
-	Super      *C.sqfs_super_t
-	Config     *C.sqfs_compressor_config_t
-	Compressor *C.sqfs_compressor_t
-	IDTable    *C.sqfs_id_table_t
+	file       *C.sqfs_file_t
+	super      *C.sqfs_super_t
+	config     *C.sqfs_compressor_config_t
+	compressor *C.sqfs_compressor_t
+	idTable    *C.sqfs_id_table_t
 	dirReader  *C.sqfs_dir_reader_t
 	dataReader *C.sqfs_data_reader_t
-	Root       *C.sqfs_inode_generic_t
+	root       *C.sqfs_inode_generic_t
 }
 
 func (s *SquashFs) Free() {
@@ -174,13 +174,13 @@ func (f FileInfo) IsDir() bool {
 // Sys - os.FileInfo.Sys underlying data source (can return nil)
 //       returns a syscall.Stat_t
 func (f FileInfo) Sys() interface{} {
-	inode := f.File.Inode
+	inode := f.File.inode
 	noImpl := uint64(999999)
 	brokenID := C.sqfs_u32(maxUint32) // brokenID set to max value
 	nlinks := C.uint(1)
 	mtime := syscall.Timespec{Sec: f.ModTime().Unix()}
 	inoNum := uint64(inode.base.inode_number)
-	blksize := f.File.SquashFs.Super.block_size
+	blksize := f.File.SquashFs.super.block_size
 	devNo := C.uint(0)
 
 	dataPtr := unsafe.Pointer(&inode.data)
@@ -217,7 +217,7 @@ func (f FileInfo) Sys() interface{} {
 		nlinks = data.nlink
 	}
 
-	idtbl := f.File.SquashFs.IDTable
+	idtbl := f.File.SquashFs.idTable
 	var uid, gid C.sqfs_u32
 
 	if r := C.sqfs_id_table_index_to_id(idtbl, inode.base.uid_idx, &uid); r != 0 {
@@ -279,9 +279,9 @@ func (f FileInfo) String() string {
 type File struct {
 	Filename   string
 	SquashFs   *SquashFs
-	Inode      *C.sqfs_inode_generic_t
 	Pos        int64
 	size       int64
+	inode      *C.sqfs_inode_generic_t
 	dirReader  *C.sqfs_dir_reader_t
 	dataReader *C.sqfs_data_reader_t
 }
@@ -293,10 +293,10 @@ func Open(name string, squash *SquashFs) (*File, error) {
 		name = name[:len(name)-1]
 	}
 	f := File{Filename: name, SquashFs: squash, Pos: 0, size: -1}
-	if r := C.sqfs_dir_reader_find_by_path(squash.dirReader, squash.Root, C.CString(name), &inode); r != 0 {
+	if r := C.sqfs_dir_reader_find_by_path(squash.dirReader, squash.root, C.CString(name), &inode); r != 0 {
 		return &f, os.ErrNotExist
 	}
-	f.Inode = inode
+	f.inode = inode
 	return &f, nil
 }
 
@@ -331,7 +331,7 @@ func (f *File) Read(b []byte) (int, error) {
 		return 0, io.EOF
 	}
 	rlen := C.sqfs_data_reader_read(f.SquashFs.dataReader,
-		f.Inode, C.ulong(f.Pos), unsafe.Pointer(&b[0]), C.uint(len(b)))
+		f.inode, C.ulong(f.Pos), unsafe.Pointer(&b[0]), C.uint(len(b)))
 	if rlen < 0 {
 		return int(rlen), fmt.Errorf("Error reading from %s. got error code %d", f.Filename, rlen)
 	}
@@ -386,7 +386,7 @@ func (inode *C.sqfs_inode_generic_t) symlinkTarget() string {
 }
 
 func getFileInfo(f *File) (FileInfo, error) {
-	inode := f.Inode
+	inode := f.inode
 
 	var myMode os.FileMode
 	var size int64
@@ -498,7 +498,7 @@ func (f *File) Readdirnames(n int) ([]string, error) {
 	names := []string{}
 	if f.dirReader == nil {
 		f.dirReader = f.SquashFs.dirReader.Copy()
-		if r := C.sqfs_dir_reader_open_dir(f.dirReader, f.Inode, 0); r != 0 {
+		if r := C.sqfs_dir_reader_open_dir(f.dirReader, f.inode, 0); r != 0 {
 			return names, fmt.Errorf("unexpected error %d. %s not a dir?", r, f.Name())
 		}
 	}
@@ -574,40 +574,40 @@ func (f *File) Sync() error {
 func OpenSquashfs(fname string) (SquashFs, error) {
 	var err error
 	sqfs := SquashFs{Filename: fname}
-	sqfs.Super = (*C.sqfs_super_t)(C.malloc(C.sizeof_sqfs_super_t))
-	sqfs.Config = (*C.sqfs_compressor_config_t)(C.malloc(C.sizeof_sqfs_compressor_config_t))
+	sqfs.super = (*C.sqfs_super_t)(C.malloc(C.sizeof_sqfs_super_t))
+	sqfs.config = (*C.sqfs_compressor_config_t)(C.malloc(C.sizeof_sqfs_compressor_config_t))
 
-	if sqfs.File, err = C.sqfs_open_file(C.CString(fname), C.SQFS_FILE_OPEN_READ_ONLY); err != nil {
+	if sqfs.file, err = C.sqfs_open_file(C.CString(fname), C.SQFS_FILE_OPEN_READ_ONLY); err != nil {
 		sqfs.Free()
 		return SquashFs{}, fmt.Errorf("failed to open %s: %s", fname, err)
 	}
 
-	if _, err = C.sqfs_super_read(sqfs.Super, sqfs.File); err != nil {
+	if _, err = C.sqfs_super_read(sqfs.super, sqfs.file); err != nil {
 		sqfs.Free()
 		return SquashFs{}, fmt.Errorf("failed to open %s: %s", fname, err)
 	}
 
-	C.sqfs_compressor_config_init(sqfs.Config, C.SQFS_COMPRESSOR(sqfs.Super.compression_id),
-		C.ulong(sqfs.Super.block_size), C.SQFS_COMP_FLAG_UNCOMPRESS)
+	C.sqfs_compressor_config_init(sqfs.config, C.SQFS_COMPRESSOR(sqfs.super.compression_id),
+		C.ulong(sqfs.super.block_size), C.SQFS_COMP_FLAG_UNCOMPRESS)
 
-	if r := C.sqfs_compressor_create(sqfs.Config, &sqfs.Compressor); r != 0 {
+	if r := C.sqfs_compressor_create(sqfs.config, &sqfs.compressor); r != 0 {
 		sqfs.Free()
 		return sqfs, fmt.Errorf("error creating compressor: %d", r)
 	}
 
-	if sqfs.IDTable, err = C.sqfs_id_table_create(0); err != nil {
+	if sqfs.idTable, err = C.sqfs_id_table_create(0); err != nil {
 		sqfs.Free()
 		return sqfs, fmt.Errorf("error creating id table: %d", err)
 	}
 
-	if r := C.sqfs_id_table_read(sqfs.IDTable, sqfs.File, sqfs.Super, sqfs.Compressor); r != 0 {
+	if r := C.sqfs_id_table_read(sqfs.idTable, sqfs.file, sqfs.super, sqfs.compressor); r != 0 {
 		sqfs.Free()
 		return sqfs, fmt.Errorf("error loading ID table")
 	}
 
 	/* create a directory reader and get the root inode */
 
-	sqfs.dirReader = C.sqfs_dir_reader_create(sqfs.Super, sqfs.Compressor, sqfs.File, 0)
+	sqfs.dirReader = C.sqfs_dir_reader_create(sqfs.super, sqfs.compressor, sqfs.file, 0)
 	if sqfs.dirReader == nil {
 		sqfs.Free()
 		return sqfs, fmt.Errorf("error creating directory reader")
@@ -620,18 +620,18 @@ func OpenSquashfs(fname string) (SquashFs, error) {
 	}
 
 	/* create a data reader */
-	sqfs.dataReader = C.sqfs_data_reader_create(sqfs.File, C.ulong(sqfs.Super.block_size), sqfs.Compressor, 0)
+	sqfs.dataReader = C.sqfs_data_reader_create(sqfs.file, C.ulong(sqfs.super.block_size), sqfs.compressor, 0)
 	if sqfs.dataReader == nil {
 		sqfs.Free()
 		return sqfs, fmt.Errorf("error creating data reader")
 	}
 
-	if r := C.sqfs_data_reader_load_fragment_table(sqfs.dataReader, sqfs.Super); r != 0 {
+	if r := C.sqfs_data_reader_load_fragment_table(sqfs.dataReader, sqfs.super); r != 0 {
 		sqfs.Free()
 		return sqfs, fmt.Errorf("error loading fragment table")
 	}
 
-	if r := C.sqfs_dir_reader_get_root_inode(sqfs.dirReader, &sqfs.Root); r != 0 {
+	if r := C.sqfs_dir_reader_get_root_inode(sqfs.dirReader, &sqfs.root); r != 0 {
 		sqfs.Free()
 		return sqfs, fmt.Errorf("error finding root node")
 	}
