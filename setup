@@ -4,6 +4,7 @@ _GO_VER=1.14.6
 VERBOSITY=0
 TEMP_D=""
 SQUASHFS_TOOLS_NG_GIT="https://github.com/AgentD/squashfs-tools-ng.git"
+[ -n "$HOME" ] || export HOME=$(echo ~)
 
 error() { echo "$@" 1>&2; }
 fail() { local r=$?;  [ $r -eq 0 ] && r=1; failrc "$r" "$@"; }
@@ -87,8 +88,6 @@ install_packages_yum() {
             fi
         fi
         statics="glibc-static lz4-static zlib-static libzstd-static"
-    else
-        statics=""
     fi
 
     local packages="\
@@ -108,7 +107,7 @@ xz-devel
 zlib-devel
 "
 
-    yum install --assumeyes $packages
+    yum install --assumeyes $packages $statics
 }
 
 install_packages() {
@@ -147,13 +146,14 @@ has_go() {
         return
     }
     [ -z "$GOPATH" ] || set -- "$GOPATH/go" "$GOPATH/go/"go[0-9]*
-    set -- "$@" $HOME/go "$HOME/go/"go[0-9]*
+    set -- "$@" "$HOME/"go "$HOME/go/"go[0-9]*
     for d in "$@"; do
         is_goroot "$d" && {
             debug 1 "GOROOT at $GOPATH/go"
             return 0
         }
     done
+    return 1
 }
 
 download() {
