@@ -544,7 +544,7 @@ func testMain(c *cli.Context) error {
 
 func main() {
 	app := &cli.App{
-		Name:    "go-squash",
+		Name:    "squashtool",
 		Version: version,
 		Usage:   "Play around or test squash",
 		Commands: []*cli.Command{
