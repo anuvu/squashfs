@@ -1,0 +1,374 @@
+#!/bin/sh
+
+_GO_VER=1.14.6
+VERBOSITY=0
+TEMP_D=""
+SQUASHFS_TOOLS_NG_GIT="https://github.com/AgentD/squashfs-tools-ng.git"
+
+error() { echo "$@" 1>&2; }
+fail() { local r=$?;  [ $r -eq 0 ] && r=1; failrc "$r" "$@"; }
+failrc() { local r=$1; shift; [ $# -eq 0 ] || error "$@"; exit $r; }
+
+Usage() {
+    cat <<EOF
+Usage: ${0##*/} [ options ] install-prefix
+
+   Get everything needed to build squashfs go package.
+
+   non-system packages are installed to install-prefix.
+   Then they can be used with:
+       PREFIX="\$PWD/mydir"
+       LD_LIBRARY_PATH=\$PREFIX/lib
+       PKG_CONFIG_PATH=\$PREFIX/lib/pkgconfig
+
+   options:
+      --squashfs-tools-ng  DIR   get squashfs-tools-ng to DIR
+EOF
+}
+
+bad_Usage() { Usage 1>&2; [ $# -eq 0 ] || error "$@"; return 1; }
+cleanup() {
+    [ -z "${TEMP_D}" -o ! -d "${TEMP_D}" ] || rm -Rf "${TEMP_D}"
+}
+
+debug() {
+    local level=${1}; shift;
+    [ "${level}" -gt "${VERBOSITY}" ] && return
+    error "${@}"
+}
+
+has_cmd() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+install_packages_apt() {
+    local packages="\
+autoconf
+autogen
+automake
+binutils
+git
+libc6-dev
+liblz4-dev
+liblzma-dev
+libtool
+libzstd-dev
+make
+pkg-config
+tar
+squashfs-tools
+zlib1g-dev
+"
+
+    apt-get update -q &&
+        apt-get install --no-install-recommends --assume-yes $packages || {
+        error "failed to install packages:" $packages
+        return 1
+    }
+}
+
+is_centos_7() {
+    for f in /etc/centos-release /etc/redhat-release; do
+        [ -f "$f" ] && grep -q "release 7" "$f" && return 0
+    done
+    return 1
+}
+
+install_packages_yum() {
+    local out="" statics=""
+    # we need epel for libzstd, but centos8 has it.
+    if is_centos_7; then
+        if !rpm -q libzstd-static >/dev/null 2>&1; then
+            local epel7u="https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch"
+            if !rpm -q epel-release >/dev/null 2>&1; then
+                yum install --assumeyes "$epel7u" || {
+                    error "failed to install epel from $epel_url"
+                }
+            fi
+        fi
+        statics="glibc-static lz4-static zlib-static libzstd-static"
+    else
+        statics=""
+    fi
+
+    local packages="\
+autoconf
+automake
+binutils
+git
+glibc-devel
+libtool
+libzstd-devel
+lz4-devel
+make
+squashfs-tools
+tar
+xz
+xz-devel
+zlib-devel
+"
+
+    yum install --assumeyes $packages
+}
+
+install_packages() {
+    [ "$(id -u)" = "0" ] || fail "sorry, have to be root for install packages."
+    if has_cmd apt-get; then
+        install_packages_apt
+    elif has_cmd yum; then
+        install_packages_yum
+    else
+        error "no idea how to install packages here"
+        return 1
+    fi
+}
+
+as_root() {
+    if [ "$(id -u)" = "0" ]; then
+        "$@"
+    else
+        has_cmd sudo || {
+            error "You don't have sudo, and you're not root. Sorry."
+            error "Try as root running: $*"
+            return 1
+        }
+        sudo "$@"
+    fi
+}
+
+is_goroot() {
+    [ -d "$1/bin" -a -d "$1/src" -a -d "$1/pkg" -a -x "$1/bin/go" ] || return
+    _RET=$("$1/bin/go" env GOROOT)
+}
+
+has_go() {
+    has_cmd go && {
+        _RET=$(go env GOROOT)
+        return
+    }
+    [ -z "$GOPATH" ] || set -- "$GOPATH/go" "$GOPATH/go/"go[0-9]*
+    set -- "$@" $HOME/go "$HOME/go/"go[0-9]*
+    for d in "$@"; do
+        is_goroot "$d" && {
+            debug 1 "GOROOT at $GOPATH/go"
+            return 0
+        }
+    done
+}
+
+download() {
+    debug 0 "downloading $1 -> $2"
+    curl --location "$1" > "$2.tmp.$$" && mv "$2.tmp.$$" "$2"
+}
+
+install_go() {
+    local ver_or_url="${1:-${_GO_VER}}" goroot="$2" tball="" url=""
+    if [ -z "${TEMP_D}" ]; then
+        TEMP_D=$(mktemp -d "${TMPDIR:-/tmp}/${0##*/}.XXXXXX") ||
+            fail "failed to make tempdir"
+        trap cleanup EXIT
+    fi
+
+    if [ -z "$goroot" ]; then
+        [ -d "$HOME/go" ] || mkdir -p "$HOME/go" || {
+            error "failed to create $HOME/go"
+            return
+        }
+        goroot="$HOME/go"
+    fi
+    local pdir=$(dirname "${goroot%/}")
+    [ -d "$pdir" ] || mkdir -p "$pdir" || {
+        error "failed to create $pdir"
+        return 1
+    }
+
+    if echo "$ver_or_url" | grep -q "^[0-9]\+.[0-9]\+.[0-9]\+$"; then
+        local ver="${ver_or_url}"
+        local url="https://dl.google.com/go/go${ver}.linux-amd64.tar.gz"
+        local url="https://golang.org/dl/go$ver.linux-amd64.tar.gz"
+        local tball="${TEMP_D}/go${ver}.tar.gz"
+        download "$url" "$tball" || {
+            error "failed to download $url for version $ver"
+            return 1
+        }
+    elif [ -f "$ver_or_url" ]; then
+        tball="$ver_or_url"
+    else
+        case "$ver_or_url" in
+            http://*|https://*)
+                url="$ver_or_url";
+                tball="${TEMP_D}/go.tar.gz";
+                download "$url" "$tball" || {
+                    error "failed to download $url"
+                    return
+                };;
+            *) error "Don't know what to do with $ver_or_url"; return 1;;
+        esac
+    fi
+
+    local exdir="${TEMP_D}/exdir"
+    debug 1 "extracting $tball"
+    mkdir "$exdir" || { error "failed to make $exdir"; return 1; }
+    tar -C "$exdir" -xf "$tball" || { 
+        error "failed extraction of $tball"
+        return 1
+    }
+
+    is_goroot "$exdir/go" || {
+        error "$tball did not contain a 'go' directory that was a goroot."
+        return 1
+    }
+
+    out=$("$exdir/go/bin/go" version) || {
+        error "failed to get version from $exdir/go"
+        return 1
+    }
+
+    # out should look like
+    #go version go1.14.5 linux/amd64
+    local ver="${out#go version }"
+    ver=${ver%% *}
+    ver=${ver#go}
+
+    echo "go version is $ver"
+
+    local bname="" target_d=""
+    bname=$(basename "$goroot")
+    if [ "$bname" = "go" ]; then
+        target_d="$goroot/go$ver"
+    else
+        target_d="$goroot"
+    fi
+    [ ! -d "$target_d" ] || rmdir "$target_d" || {
+        error "$target_d already exists - remove it. sorry."
+        return 1
+    }
+
+    mv "$exdir/go" "$target_d" || {
+        error "failed to move extracted go dir into $target_d"
+        return 1
+    }
+
+
+    if [ -d "$HOME/bin" ] &&
+        [ ! -e "$HOME/bin/go" -o -L "$HOME/bin/go" ]; then
+            ln -s "$target_d/bin/go" "$HOME/bin/go"
+        echo "GOROOT is $target_d. I linked it into $HOME/bin/go"
+    else
+        echo "GOROOT is $target_d. include ${target_d}/bin in your PATH"
+    fi
+
+    return 0
+}
+
+print_success() {
+    local prefix="$1"
+    cat <<EOF
+
+------
+Successfully prepped system for building.
+Now to build, do:
+
+  export LD_LIBRARY_PATH=$prefix/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}
+  export PKG_CONFIG_PATH=$prefix/lib/pkgconfig\${PKG_CONFIG_PATH:+:\$PKG_CONFIG_PATH}
+  export PATH=$prefix/bin:\$PATH
+
+  make
+
+EOF
+}
+
+main() {
+    local short_opts="hIv"
+    local long_opts="help,install-packages,squashfs-tools-ng:,verbose"
+    local getopt_out=""
+    getopt_out=$(getopt --name "${0##*/}" \
+        --options "${short_opts}" --long "${long_opts}" -- "$@") &&
+        eval set -- "${getopt_out}" ||
+        { bad_Usage; return; }
+
+    local cur="" next=""
+    local output="" squashfs_ng_d="$PWD/squashfs-tools-ng" install_packages=false
+
+    while [ $# -ne 0 ]; do
+        cur="$1"; next="$2";
+        case "$cur" in
+            -h|--help) Usage ; exit 0;;
+            --install-packages) install_packages=true;;
+            --squashfs-tools-ng) squashfs_ng_d=$next; shift;;
+            -v|--verbose) VERBOSITY=$((${VERBOSITY}+1));;
+            --) shift; break;;
+        esac
+        shift;
+    done
+
+    [ $# -ne 0 ] || { bad_Usage "must provide install prefix"; return; }
+    [ $# -eq 1 ] || { bad_Usage "got $# args ($*) expected just 1"; return; }
+
+    local prefix_in="$1" prefix="" start_d="$PWD"
+    [ -d "$prefix_in" ] || mkdir -p "$prefix_in" || {
+        error "failed to create $prefix_in"
+        return 1
+    }
+    prefix=$(cd "$prefix_in" && pwd) || {
+        error "failed tog et full path for $prefix_in"
+        return 1
+    }
+
+    TEMP_D=$(mktemp -d "${TMPDIR:-/tmp}/${0##*/}.XXXXXX") ||
+        fail "failed to make tempdir"
+    trap cleanup EXIT
+
+    if [ "$install_packages" = "true" ]; then
+        as_root "$0" install-packages || {
+            error "failed to install packages"
+            return 1
+        }
+    fi
+
+    if ! has_go; then
+        install_go || {
+            error "failed to install go."
+            return 1
+        }
+    fi
+
+    if [ -d "$squashfs_ng_d" ]; then
+        debug 1 "using existing squashfs-tools-ng dir in $squashfs_ng_d"
+    else
+        local pdir="$(dirname $squashfs_ng_d)"
+        [ -d "$pdir" ] || mkdir -p "$pdir" || {
+            error "failed to create $pdir";
+            return 1
+        }
+        git clone "${SQUASHFS_TOOLS_NG_GIT}" "$squashfs_ng_d" || {
+            error "failed to clone ${SQUASHFS_TOOLS_NG_GIT} to $squashfs_ng_d"
+        }
+    fi
+
+    cd "$squashfs_ng_d" || { 
+        error "failed to cd $squashfs_ng_d"
+        return 1
+    }
+
+    ./autogen.sh &&
+        ./configure "--prefix=$prefix" &&
+        make &&
+        make install || {
+            error "failed to build squashfs-tools-ng"
+            error "maybe try as root: $0 install-packages"
+            return 1
+    }
+
+    print_success $prefix
+}
+
+if [ "$1" = "install-packages" ]; then
+    install_packages "$@"
+elif [ "$1" = "install-go" ]; then
+    shift
+    install_go "$@"
+else
+    main "$@"
+fi
+# vi: ts=4 expandtab
