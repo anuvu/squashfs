@@ -78,9 +78,9 @@ install_packages_yum() {
     local out="" statics=""
     # we need epel for libzstd, but centos8 has it.
     if is_centos_7; then
-        if !rpm -q libzstd-static >/dev/null 2>&1; then
-            local epel7u="https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch"
-            if !rpm -q epel-release >/dev/null 2>&1; then
+        if ! rpm -q libzstd-static >/dev/null 2>&1; then
+            local epel7u="https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm"
+            if ! rpm -q epel-release >/dev/null 2>&1; then
                 yum install --assumeyes "$epel7u" || {
                     error "failed to install epel from $epel_url"
                 }
