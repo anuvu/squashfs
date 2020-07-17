@@ -474,6 +474,11 @@ func extractMain(c *cli.Context) error {
 	return extractor.Extract()
 }
 
+func versionMain(c *cli.Context) error {
+	fmt.Println(version)
+	return nil
+}
+
 func testMain(c *cli.Context) error {
 	var fname string
 	if c.Args().Len() >= 1 {
@@ -548,6 +553,11 @@ func main() {
 		Version: version,
 		Usage:   "Play around or test squash",
 		Commands: []*cli.Command{
+			&cli.Command{
+				Name:   "version",
+				Usage:  "Print version, exit",
+				Action: versionMain,
+			},
 			&cli.Command{
 				Name:   "test-main",
 				Usage:  "just run the main test",
