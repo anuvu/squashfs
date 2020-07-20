@@ -8,6 +8,8 @@ It will build against 1.0.0, but the Read operations require a fix for [squashfs
 There is really good doc of squashfs format at [doc/format.txt](https://github.com/AgentD/squashfs-tools-ng/blob/master/doc/format.txt)
 
 ## Build setup
+Most of this is handled by `setup` program.  But if you want to do it on your own, the following is a summary of what `setup` will do.
+
 I'm assuming you have 'git'.  Get that with apt or yum.
 
  * get squashfs-tools-ng
