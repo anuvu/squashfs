@@ -47,7 +47,7 @@ func (e *Extractor) extract(path string, info FileInfo, perr error) error {
 
 	if whiteOut := getWhiteOut(info); whiteOut != "" {
 		if !e.WhiteOuts {
-			e.Logger.Debug("skipping whiteout %s", path)
+			e.Logger.Debug("not extracting white-out file %s", path)
 			return nil
 		}
 		return e.applyWhiteOut(path, whiteOut)
@@ -206,7 +206,8 @@ func (e *Extractor) extractDir(path string, info FileInfo) error {
 
 func (e *Extractor) applyWhiteOut(path string, whiteOut string) error {
 	fp := filepath.Join(e.Dir, path)
-	if PathExists(filepath.Join(e.Dir, path)) {
+	if PathExists(fp) {
+		e.Logger.Debug("applying white-out '%s' by removing '%s'", whiteOut, path)
 		return os.RemoveAll(fp)
 	}
 	return nil
