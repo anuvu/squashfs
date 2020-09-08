@@ -1,6 +1,6 @@
 #!/bin/sh
 
-_GO_VER=1.14.6
+_GO_VER=1.14.8
 VERBOSITY=0
 TEMP_D=""
 SQUASHFS_TOOLS_NG_GIT="https://github.com/AgentD/squashfs-tools-ng.git"
