@@ -34,7 +34,7 @@ cleanup() {
 
 debug() {
     local level=${1}; shift;
-    [ "${level}" -gt "${VERBOSITY}" ] && return
+    [ "${level}" -lt "${VERBOSITY}" ] && return
     error "${@}"
 }
 
@@ -161,32 +161,60 @@ download() {
     curl --location "$1" > "$2.tmp.$$" && mv "$2.tmp.$$" "$2"
 }
 
+link_bins() {
+    local linkdir="${1%/}/" from_d="$2"
+    mkdir -p "$linkdir" || {
+        error "failed to create $linkdir"
+        return 1
+    }
+    set -- "${from_d%/}"/*
+    ln -sf -- "$@" "${linkdir}" || {
+        error "failed to $* to ${linkdir}"
+        return 1
+    }
+    debug 1 "Linked $* to $linkdir"
+}
+
 install_go() {
-    local ver_or_url="${1:-${_GO_VER}}" goroot="$2" tball="" url=""
+    local ver_or_url="$1" govdir="$2" tball="" url=""
     if [ -z "${TEMP_D}" ]; then
         TEMP_D=$(mktemp -d "${TMPDIR:-/tmp}/${0##*/}.XXXXXX") ||
             fail "failed to make tempdir"
         trap cleanup EXIT
     fi
 
-    if [ -z "$goroot" ]; then
-        [ -d "$HOME/go" ] || mkdir -p "$HOME/go" || {
-            error "failed to create $HOME/go"
-            return
-        }
-        goroot="$HOME/go"
+    local linkdir="" goroot=""
+    # govdir: go version dir - the directory that contains go-X.Y.Z dirs.
+    if [ -z "$govdir" ]; then
+        if [ "$(id -u)" != "0" ]; then
+            [ -d "$HOME/go" ] || mkdir -p "$HOME/go" || {
+                error "failed to create $HOME/go"
+                return
+            }
+            govdir="$HOME/go"
+            linkdir="$HOME/bin"
+        else
+            govdir="/usr/local"
+            linkdir="/usr/local/bin"
+        fi
+    else
+        if [ -e "$govdir" ]; then
+            error "$govdir exists."
+            return 1
+        fi
+        goroot="$govdir"
+        govdir=$(dirname "${goroot%/}")
     fi
-    local pdir=$(dirname "${goroot%/}")
-    [ -d "$pdir" ] || mkdir -p "$pdir" || {
-        error "failed to create $pdir"
+
+    mkdir -p "$govdir" || {
+        error "failed to create $govdir"
         return 1
     }
 
     if echo "$ver_or_url" | grep -q "^[0-9]\+.[0-9]\+.[0-9]\+$"; then
         local ver="${ver_or_url}"
-        local url="https://dl.google.com/go/go${ver}.linux-amd64.tar.gz"
         local url="https://golang.org/dl/go$ver.linux-amd64.tar.gz"
-        local tball="${TEMP_D}/go${ver}.tar.gz"
+        tball="${TEMP_D}/go${ver}.tar.gz"
         download "$url" "$tball" || {
             error "failed to download $url for version $ver"
             return 1
@@ -209,7 +237,7 @@ install_go() {
     local exdir="${TEMP_D}/exdir"
     debug 1 "extracting $tball"
     mkdir "$exdir" || { error "failed to make $exdir"; return 1; }
-    tar -C "$exdir" -xf "$tball" || { 
+    tar -C "$exdir" -xf "$tball" || {
         error "failed extraction of $tball"
         return 1
     }
@@ -230,32 +258,49 @@ install_go() {
     ver=${ver%% *}
     ver=${ver#go}
 
-    echo "go version is $ver"
-
-    local bname="" target_d=""
-    bname=$(basename "$goroot")
-    if [ "$bname" = "go" ]; then
-        target_d="$goroot/go$ver"
-    else
-        target_d="$goroot"
+    if [ -z "$goroot" ]; then
+        goroot="${govdir}/go-$ver"
     fi
-    [ ! -d "$target_d" ] || rmdir "$target_d" || {
-        error "$target_d already exists - remove it. sorry."
+
+    if [ -e "$goroot" ]; then
+        error "$goroot exists. remove it."
+        return 1
+    elif [ -L "$goroot" ]; then
+        error "$goroot is a dangling symlink - remove it."
+        return 1
+    fi
+    debug 0 "go version is $ver. Installing to ${goroot}"
+
+    [ -d "$goroot" ] || mkdir -p "$goroot" || {
+        error "Failed to create $goroot"
+    }
+    [ ! -d "$goroot" ] || rmdir "$goroot" || {
+        error "$goroot already exists - remove it. sorry."
         return 1
     }
 
-    mv "$exdir/go" "$target_d" || {
-        error "failed to move extracted go dir into $target_d"
+    mv "$exdir/go" "$goroot" || {
+        error "failed to move extracted go dir into $goroot"
         return 1
     }
 
+    if [ -n "$linkdir" ]; then
+        link_bins "$linkdir" "$goroot/bin" || {
+            error "Failed to link binaries to $linkdir."
+            return 1
+        }
+        debug 0 "GOROOT is $goroot bins linked into $linkdir"
 
-    if [ -d "$HOME/bin" ] &&
-        [ ! -e "$HOME/bin/go" -o -L "$HOME/bin/go" ]; then
-            ln -s "$target_d/bin/go" "$HOME/bin/go"
-        echo "GOROOT is $target_d. I linked it into $HOME/bin/go"
+        local cur=""
+        if cur=$(command -v "go"); then
+            [ "$cur" = "$linkdir/go" -a "$cur" != "$goroot/bin/go" ] || {
+                debug 0 "go in current path is $cur != $linkdir/go"
+            }
+        else
+            debug 0 "$linkdir appears to not be in your path."
+        fi
     else
-        echo "GOROOT is $target_d. include ${target_d}/bin in your PATH"
+        debug 0 "GOROOT is $goroot add $goroot/bin to your PATH"
     fi
 
     return 0
@@ -276,6 +321,17 @@ Now to build, do:
   make
 
 EOF
+}
+
+check_prefix() {
+    local prefix="$1"
+    shift
+    if [ "$prefix" != "/usr/local" ]; then
+        debug 1 "prefix is /usr/local, trying with defaults"
+    else
+        set -- PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
+    fi
+    env "$@" pkg-config libsquashfs1
 }
 
 main() {
@@ -346,7 +402,7 @@ main() {
         }
     fi
 
-    cd "$squashfs_ng_d" || { 
+    cd "$squashfs_ng_d" || {
         error "failed to cd $squashfs_ng_d"
         return 1
     }
@@ -358,6 +414,11 @@ main() {
             error "failed to build squashfs-tools-ng"
             error "maybe try as root: $0 install-packages"
             return 1
+    }
+
+    check_prefix "$prefix" || {
+        error "Failed to check for squashfs via pkg-config"
+        return 1
     }
 
     print_success $prefix
