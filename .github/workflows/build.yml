@@ -9,14 +9,29 @@ jobs:
     - name: Check out code into the Go module directory
       uses: actions/checkout@v2
 
-    - name: Setup
+    - name: Install Deps
+      run: |
+        emd=$(which eatmydata) || :
+        sudo $emd ./setup install-packages
+
+    - name: Install Golang
       run: |
         . ./.github/workflows/env
-        ./setup --install-packages $MYLOCAL
+        ./setup install-go
+        which go
+        go env
+        go version
+
+    - name: Build squashfs-tools-ng
+      run: |
+        . ./.github/workflows/env
+        ./setup $MYLOCAL
 
     - name: Build
       run: |
         . ./.github/workflows/env
+        which go
+        go version
         make all
         make static
 
