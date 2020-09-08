@@ -217,7 +217,7 @@ func (e *Extractor) applyWhiteOut(path string, whiteOut string) error {
 func doCreate(path string, fInfo FileInfo, creator func() error) error {
 	var createError, cleanupError error
 	cleanup, err := prepWrite(path, fInfo)
-	if err != nil {
+	if err == nil {
 		createError = creator()
 	}
 	cleanupError = cleanup()
