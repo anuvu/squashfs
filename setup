@@ -1,6 +1,6 @@
 #!/bin/sh
 
-_GO_VER=1.14.6
+_GO_VER=1.14.8
 VERBOSITY=0
 TEMP_D=""
 SQUASHFS_TOOLS_NG_GIT="https://github.com/AgentD/squashfs-tools-ng.git"
@@ -176,7 +176,7 @@ link_bins() {
 }
 
 install_go() {
-    local ver_or_url="$1" govdir="$2" tball="" url=""
+    local ver_or_url="${1:-${_GO_VER}}" govdir="$2" tball="" url=""
     if [ -z "${TEMP_D}" ]; then
         TEMP_D=$(mktemp -d "${TMPDIR:-/tmp}/${0##*/}.XXXXXX") ||
             fail "failed to make tempdir"

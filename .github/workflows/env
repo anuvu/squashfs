@@ -6,3 +6,6 @@ LD_LIBRARY_PATH="$MYLOCAL/lib"
 PKG_CONFIG_PATH="$MYLOCAL/lib/pkgconfig"
 
 export MYLOCAL PATH LD_LIBRARY_PATH PKG_CONFIG_PATH
+
+# these get set in default environment and confuse the local install.
+unset GOTOOLDIR GOROOT
