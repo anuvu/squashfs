@@ -326,7 +326,7 @@ EOF
 check_prefix() {
     local prefix="$1"
     shift
-    if [ "$prefix" != "/usr/local" ]; then
+    if [ "$prefix" = "/usr/local" ]; then
         debug 1 "prefix is /usr/local, trying with defaults"
     else
         set -- PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
