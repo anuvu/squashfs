@@ -5,7 +5,7 @@ fail() { echo "$@" 1>&2; exit 1; }
 
 cleanup() {
     if [ -d "$TEMP_D" ]; then
-        find "$TEMP_D" -type d -exec chmod "u+w" "{}" "+"
+        chmod -R u+rwx "${TEMP_D}"
         rm -Rf "$TEMP_D"
     fi
 }
@@ -80,6 +80,10 @@ chmod 4755 perms/file-4755
 mkdir perms/no-write.d
 touch perms/no-write.d/file.txt
 chmod 555 perms/no-write.d
+
+mkdir perms/no-read.d
+touch perms/no-read.d/file.txt
+chmod 111 perms/no-read.d
 
 #mkdir perms/no-read.d
 #touch perms/no-read.d/file.txt
