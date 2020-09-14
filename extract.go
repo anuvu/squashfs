@@ -31,12 +31,30 @@ type Extractor struct {
 	Devs      bool
 	Sockets   bool
 	Logger    Logger
+	cleanups  []func() error
 }
 
 // Extract - extract the
 func (e *Extractor) Extract() error {
+	var walkErr, cleanErr error
 	e.Logger.Debug("extractor: %#v", e)
-	return e.SquashFs.Walk(e.Path, e.extract)
+
+	walkErr = e.SquashFs.Walk(e.Path, e.extract)
+
+	for _, c := range e.cleanups {
+		if err := c(); err != nil {
+			e.Logger.Info("Cleanup failed: %s", err)
+			if cleanErr != nil {
+				cleanErr = err
+			}
+		}
+	}
+
+	if walkErr != nil {
+		return walkErr
+	}
+
+	return cleanErr
 }
 
 func (e *Extractor) extract(path string, info FileInfo, perr error) error {
@@ -103,9 +121,21 @@ func (e *Extractor) extract(path string, info FileInfo, perr error) error {
 	}
 
 	if e.Perms {
-		e.Logger.Debug("chmod(%s, %#o)", path, info.FMode.Perm())
-		if err := chmod(fpath, info.FMode); err != nil {
-			e.Logger.Info("chmod(%s, %#o) failed: %s", path, info.FMode.Perm(), err)
+		mode := info.Mode()
+		modrw := ""
+		// if a dir does not have owner RW perms, then extract it with RW and add a cleanup to set it back
+		if mode&os.ModeDir != 0 && mode.Perm()&0600 == 0 {
+			oldMode := mode
+			mode |= 0600
+			modrw = "(+rw)"
+			e.cleanups = append(e.cleanups, func() error {
+				e.Logger.Debug("fixing %s back to %04o", path, oldMode.Perm())
+				return chmod(fpath, oldMode)
+			})
+		}
+		e.Logger.Debug("chmod(%s, %04o)%s", path, mode.Perm(), modrw)
+		if err := chmod(fpath, mode); err != nil {
+			e.Logger.Info("chmod(%s, %04o) failed: %s", path, mode.Perm(), err)
 			return err
 		}
 	}
