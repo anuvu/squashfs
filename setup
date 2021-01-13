@@ -3,7 +3,7 @@
 _GO_VER=1.14.8
 VERBOSITY=0
 TEMP_D=""
-SQFSNG_GIT="${SQFS_NG_GIT:-https://github.com/AgentD/squashfs-tools-ng.git}"
+SQFSNG_GIT="${SQFS_NG_GIT:-https://github.com/smoser/squashfs-tools-ng.git}"
 SQFSNG_REF="${SQFS_REF-origin/fixes-1.0.0}"
 [ -n "$HOME" ] || export HOME=$(echo ~)
 
