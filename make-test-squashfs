@@ -85,6 +85,10 @@ mkdir perms/no-read.d
 touch perms/no-read.d/file.txt
 chmod 111 perms/no-read.d
 
+
+mkdir oddfellows/
+echo "systemd-x" > "oddfellows/system-systemd\x2dcryptsetup.slice"
+
 #mkdir perms/no-read.d
 #touch perms/no-read.d/file.txt
 #chmod 000 perms/no-read.d

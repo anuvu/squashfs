@@ -25,6 +25,7 @@ $(SQUASHTOOL).static: $(GO_LIB_FILES) $(GO_TOOL_FILES)
 
 test: $(SQUASHTOOL) images
 	./$(SQUASHTOOL) test-main noroot.squashfs
+	./$(SQUASHTOOL) list noroot.squashfs
 
 images: $(SQUASHFS_IMAGES)
 
