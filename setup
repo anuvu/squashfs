@@ -3,7 +3,8 @@
 _GO_VER=1.14.8
 VERBOSITY=0
 TEMP_D=""
-SQUASHFS_TOOLS_NG_GIT="https://github.com/AgentD/squashfs-tools-ng.git"
+SQFSNG_GIT="${SQFS_NG_GIT:-https://github.com/AgentD/squashfs-tools-ng.git}"
+SQFSNG_REF="${SQFS_REF-origin/fixes-1.0.0}"
 [ -n "$HOME" ] || export HOME=$(echo ~)
 
 error() { echo "$@" 1>&2; }
@@ -392,14 +393,30 @@ main() {
     if [ -d "$squashfs_ng_d" ]; then
         debug 1 "using existing squashfs-tools-ng dir in $squashfs_ng_d"
     else
-        local pdir="$(dirname $squashfs_ng_d)"
+        local pdir=$(dirname "$squashfs_ng_d")
         [ -d "$pdir" ] || mkdir -p "$pdir" || {
             error "failed to create $pdir";
             return 1
         }
-        git clone "${SQUASHFS_TOOLS_NG_GIT}" "$squashfs_ng_d" || {
-            error "failed to clone ${SQUASHFS_TOOLS_NG_GIT} to $squashfs_ng_d"
+        git clone "${SQFSNG_GIT}" "$squashfs_ng_d" || {
+            error "failed to clone ${SQFSNG_GIT} to $squashfs_ng_d"
+            return 1
         }
+        if [ -n "${SQFSNG_REF}" ]; then
+            debug 1 "checking out ${SQFSNG_REF}"
+            (
+                cd "$squashfs_ng_d" || {
+                    error "failed cd to squashfs dir '$squashfs_ng_d'"
+                    exit 1
+                }
+                git checkout "${SQFSNG_REF}" || {
+                    error "Failed to checkout commitish ${SQFSNG_REF}"
+                    exit 1
+                }
+            ) || return
+        else
+            debug 1 "SQFSNG_REF not set, leaving tree as it is."
+        fi
     fi
 
     cd "$squashfs_ng_d" || {

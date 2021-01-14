@@ -1,6 +1,6 @@
 # set up shell environment MYLOCAL and PATH.
 # mylocal is like "/usr/local" but for this user.
-MYLOCAL="$HOME/my-local"
+MYLOCAL=${MYLOCAL:-"$HOME/my-local"}
 PATH="$HOME/bin:$MYLOCAL/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 LD_LIBRARY_PATH="$MYLOCAL/lib"
 PKG_CONFIG_PATH="$MYLOCAL/lib/pkgconfig"
