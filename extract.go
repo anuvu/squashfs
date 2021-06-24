@@ -31,12 +31,90 @@ type Extractor struct {
 	Devs      bool
 	Sockets   bool
 	Logger    Logger
+	Ops       FsOps
 	cleanups  []func() error
+}
+
+type FsOps interface {
+	Chmod(string, os.FileMode) error
+	Chown(string, int, int) error
+	Mknod(string, FileInfo) error
+}
+
+type GoFsOps struct{}
+
+func (g GoFsOps) Chmod(name string, mode os.FileMode) error {
+	return os.Chmod(name, mode)
+}
+
+func (g GoFsOps) Chown(name string, uid, gid int) error {
+	return os.Chown(name, uid, gid)
+}
+
+func (g GoFsOps) Mknod(path string, info FileInfo) error {
+	stat := info.Sys().(syscall.Stat_t)
+	return syscall.Mknod(path, DefaultFilePerm, int(stat.Rdev))
+}
+
+// Golang's os.Chown, os.Chmod, syscall.Mknod, make syscalls
+// which are missed by fakeroot's LD_PRELOAD of those filesystem operations.
+// In order to work with fakeroot, we execute the programs
+// 'chown', 'chmod', 'mknod' which are expected to work with fakeroot.
+type FakerootOps struct{}
+
+func (f FakerootOps) Chmod(name string, mode os.FileMode) error {
+	return exec.Command("chmod", fmt.Sprintf("%04o", mode.Perm()), name).Run()
+}
+
+func (f FakerootOps) Chown(name string, uid, gid int) error {
+	return exec.Command("chown", "--no-dereference", fmt.Sprintf("%d:%d", uid, gid), name).Run()
+}
+
+func (f FakerootOps) Mknod(path string, info FileInfo) error {
+	// dtype is b (block), c (char), p (fifo)
+	var dtype string
+	stat := info.Sys().(syscall.Stat_t)
+	majMin := []string{fmt.Sprintf("%d", stat.Rdev/256), fmt.Sprintf("%d", stat.Rdev%256)}
+
+	if info.FMode&os.ModeCharDevice != 0 {
+		dtype = "c"
+	} else if info.FMode&os.ModeDevice != 0 {
+		dtype = "b"
+	} else if info.FMode&os.ModeNamedPipe != 0 {
+		dtype = "p"
+		majMin = []string{}
+	} else {
+		return fmt.Errorf("%s is not a char, block or fifo", path)
+	}
+
+	cmd := append(
+		[]string{"mknod", fmt.Sprintf("--mode=%o", info.FMode.Perm()),
+			path, dtype}, majMin...)
+	if err := exec.Command(cmd[0], cmd[1:]...).Run(); err != nil {
+		if PathExists(path) {
+			return os.ErrExist
+		}
+		return err
+	}
+	return nil
 }
 
 // Extract - extract the
 func (e *Extractor) Extract() error {
 	var walkErr, cleanErr error
+	fmt.Printf("ops=%v\nis this fakeroot? %t\n", e.Ops, isFakeroot())
+	if e.Ops == nil {
+		if isFakeroot() {
+			ops, err := GetLibcFsOps()
+			if err != nil {
+				return err
+			}
+			e.Ops = ops
+			// e.Ops = FakerootOps{}
+		} else {
+			e.Ops = GoFsOps{}
+		}
+	}
 	e.Logger.Debug("extractor: %#v", e)
 
 	walkErr = e.SquashFs.Walk(e.Path, e.extract)
@@ -114,7 +192,7 @@ func (e *Extractor) extract(path string, info FileInfo, perr error) error {
 	if e.Owners {
 		stat := info.Sys().(syscall.Stat_t)
 		e.Logger.Debug("chown(%s, %d, %d)", path, stat.Uid, stat.Gid)
-		if err := chown(fpath, int(stat.Uid), int(stat.Gid)); err != nil {
+		if err := e.Ops.Chown(fpath, int(stat.Uid), int(stat.Gid)); err != nil {
 			e.Logger.Info("chown(%s, %d, %d) failed: %s", path, stat.Uid, stat.Gid, err)
 			return err
 		}
@@ -122,21 +200,24 @@ func (e *Extractor) extract(path string, info FileInfo, perr error) error {
 
 	if e.Perms {
 		mode := info.Mode()
-		modrw := ""
-		// if a dir does not have owner RW perms, then extract it with RW and add a cleanup to set it back
-		if mode&os.ModeDir != 0 && mode.Perm()&0600 == 0 {
-			oldMode := mode
-			mode |= 0600
-			modrw = "(+rw)"
-			e.cleanups = append(e.cleanups, func() error {
-				e.Logger.Debug("fixing %s back to %04o", path, oldMode.Perm())
-				return chmod(fpath, oldMode)
-			})
-		}
-		e.Logger.Debug("chmod(%s, %04o)%s", path, mode.Perm(), modrw)
-		if err := chmod(fpath, mode); err != nil {
-			e.Logger.Info("chmod(%s, %04o) failed: %s", path, mode.Perm(), err)
-			return err
+		// you can't chmod a symlink.
+		if mode&os.ModeSymlink == 0 {
+			modrw := ""
+			// if a dir does not have owner RW perms, then extract it with RW and add a cleanup to set it back
+			if mode&os.ModeDir != 0 && mode.Perm()&0600 == 0 {
+				oldMode := mode
+				mode |= 0600
+				modrw = "(+rw)"
+				e.cleanups = append(e.cleanups, func() error {
+					e.Logger.Debug("fixing %s back to %04o", path, oldMode.Perm())
+					return e.Ops.Chmod(fpath, oldMode)
+				})
+			}
+			e.Logger.Debug("chmod(%s, %04o)%s", path, mode.Perm(), modrw)
+			if err := e.Ops.Chmod(fpath, mode); err != nil {
+				e.Logger.Info("chmod(%s, %04o) failed: %s", path, mode.Perm(), err)
+				return err
+			}
 		}
 	}
 
@@ -146,7 +227,7 @@ func (e *Extractor) extract(path string, info FileInfo, perr error) error {
 func (e *Extractor) extractSymlink(path string, info FileInfo) error {
 	e.Logger.Debug("symlink: %s", path)
 	targetPath := filepath.Join(e.Dir, path)
-	return doCreate(targetPath, info,
+	return e.doCreate(targetPath, info,
 		func() error {
 			return os.Symlink(info.SymlinkTarget, targetPath)
 		})
@@ -155,7 +236,7 @@ func (e *Extractor) extractSymlink(path string, info FileInfo) error {
 func (e *Extractor) extractNamedPipe(path string, info FileInfo) error {
 	e.Logger.Debug("mkfifo: %s", path)
 	targetPath := filepath.Join(e.Dir, path)
-	return doCreate(targetPath, info,
+	return e.doCreate(targetPath, info,
 		func() error {
 			return syscall.Mkfifo(targetPath, DefaultFilePerm)
 		},
@@ -165,7 +246,7 @@ func (e *Extractor) extractNamedPipe(path string, info FileInfo) error {
 func (e *Extractor) extractSocket(path string, info FileInfo) error {
 	e.Logger.Debug("socket: %s", path)
 	targetPath := filepath.Join(e.Dir, path)
-	return doCreate(targetPath, info,
+	return e.doCreate(targetPath, info,
 		func() error {
 			_, err := net.Listen("unix", targetPath)
 			return err
@@ -175,21 +256,21 @@ func (e *Extractor) extractSocket(path string, info FileInfo) error {
 func (e *Extractor) extractBlockDevice(path string, info FileInfo) error {
 	e.Logger.Debug("bdev: %s", path)
 	targetPath := filepath.Join(e.Dir, path)
-	return doCreate(targetPath, info,
-		func() error { return mknod(targetPath, info) })
+	return e.doCreate(targetPath, info,
+		func() error { return e.Ops.Mknod(targetPath, info) })
 }
 
 func (e *Extractor) extractCharDevice(path string, info FileInfo) error {
 	e.Logger.Debug("cdev: %s", path)
 	targetPath := filepath.Join(e.Dir, path)
-	return doCreate(targetPath, info,
-		func() error { return mknod(targetPath, info) })
+	return e.doCreate(targetPath, info,
+		func() error { return e.Ops.Mknod(targetPath, info) })
 }
 
 func (e *Extractor) extractRegular(path string, info FileInfo) error {
 	var finalError, cleanupError error
 	targetPath := filepath.Join(e.Dir, path)
-	cleanup, err := prepWrite(targetPath, info)
+	cleanup, err := e.prepWrite(targetPath, info)
 
 	if err == nil {
 		if writeFp, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY, DefaultFilePerm); err == nil {
@@ -243,27 +324,9 @@ func (e *Extractor) applyWhiteOut(path string, whiteOut string) error {
 	return nil
 }
 
-// doCreate - prep writing of fInfo to path, and then call creator.
-func doCreate(path string, fInfo FileInfo, creator func() error) error {
-	var createError, cleanupError error
-	cleanup, err := prepWrite(path, fInfo)
-	if err == nil {
-		createError = creator()
-	}
-	cleanupError = cleanup()
-
-	if cleanupError != nil {
-		if createError == nil {
-			return cleanupError
-		}
-	}
-
-	return createError
-}
-
 // prepWrite - prepare to write to path
 //   if dirname(path) is not a directory - return error
-func prepWrite(path string, finfo FileInfo) (func() error, error) {
+func (e *Extractor) prepWrite(path string, finfo FileInfo) (func() error, error) {
 	cleanup := func() error { return nil }
 	dir := filepath.Dir(path)
 	dirFinfo, err := os.Stat(dir)
@@ -279,9 +342,9 @@ func prepWrite(path string, finfo FileInfo) (func() error, error) {
 	if unix.Access(dir, unix.W_OK) != nil {
 		oldPerms := dirFinfo.Mode()
 		setBack := func() error {
-			return chmod(dir, oldPerms)
+			return e.Ops.Chmod(dir, oldPerms)
 		}
-		if err := chmod(dir, OpenDirPerm); err != nil {
+		if err := e.Ops.Chmod(dir, OpenDirPerm); err != nil {
 			return cleanup, err
 		}
 		if unix.Access(dir, unix.W_OK) != nil {
@@ -319,67 +382,26 @@ func prepWrite(path string, finfo FileInfo) (func() error, error) {
 	return cleanup, os.Remove(path)
 }
 
+// doCreate - prep writing of fInfo to path, and then call creator.
+func (e *Extractor) doCreate(path string, fInfo FileInfo, creator func() error) error {
+	var createError, cleanupError error
+	cleanup, err := e.prepWrite(path, fInfo)
+	if err == nil {
+		createError = creator()
+	}
+	cleanupError = cleanup()
+
+	if cleanupError != nil {
+		if createError == nil {
+			return cleanupError
+		}
+	}
+
+	return createError
+}
+
 func isFakeroot() bool {
 	return os.Getenv("FAKEROOTKEY") != ""
-}
-
-func chown(path string, uid int, gid int) error {
-	// something like this will fail under fakeroot.  I think it is
-	// because golang is making the syscall "directly" rather than through
-	// the library that was LD_PRELOAD.
-	// file := "/tmp/my.txt"
-	// owner := 0
-	// if err := os.Chown(file, owner, owner); err != nil {
-	//	fmt.Printf("Failed chown %s %d: %s\n", file, owner, err)
-	//	os.Exit(1)
-	// }
-	if !isFakeroot() {
-		return os.Lchown(path, uid, gid)
-	}
-	cmd := []string{"chown", "--no-dereference", fmt.Sprintf("%d:%d", uid, gid), path}
-	return exec.Command(cmd[0], cmd[1:]...).Run()
-}
-
-func chmod(path string, mode os.FileMode) error {
-	if mode&os.ModeSymlink != 0 {
-		// you can't chmod a symlink.
-		return nil
-	}
-	return os.Chmod(path, mode.Perm())
-}
-
-func mknod(path string, info FileInfo) error {
-	stat := info.Sys().(syscall.Stat_t)
-	if !isFakeroot() {
-		return syscall.Mknod(path, DefaultFilePerm, int(stat.Rdev))
-	}
-
-	// We execute `mknod` for same fakeroot reason as chown.
-	// dtype is b (block), c (char), p (fifo)
-	var dtype string
-	majMin := []string{fmt.Sprintf("%d", stat.Rdev/256), fmt.Sprintf("%d", stat.Rdev%256)}
-
-	if info.FMode&os.ModeCharDevice != 0 {
-		dtype = "c"
-	} else if info.FMode&os.ModeDevice != 0 {
-		dtype = "b"
-	} else if info.FMode&os.ModeNamedPipe != 0 {
-		dtype = "p"
-		majMin = []string{}
-	} else {
-		return fmt.Errorf("%s is not a char, block or fifo", path)
-	}
-
-	cmd := append(
-		[]string{"mknod", fmt.Sprintf("--mode=%o", info.FMode.Perm()),
-			path, dtype}, majMin...)
-	if err := exec.Command(cmd[0], cmd[1:]...).Run(); err != nil {
-		if PathExists(path) {
-			return os.ErrExist
-		}
-		return err
-	}
-	return nil
 }
 
 func getWhiteOut(info FileInfo) string {
