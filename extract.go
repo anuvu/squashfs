@@ -48,7 +48,7 @@ func (g GoFsOps) Chmod(name string, mode os.FileMode) error {
 }
 
 func (g GoFsOps) Chown(name string, uid, gid int) error {
-	return os.Chown(name, uid, gid)
+	return os.Lchown(name, uid, gid)
 }
 
 func (g GoFsOps) Mknod(path string, info FileInfo) error {
