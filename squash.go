@@ -309,6 +309,9 @@ func (f *File) Close() error {
 	if f.dirReader != nil {
 		C.free(unsafe.Pointer(f.dirReader))
 	}
+	if f.inode != nil {
+		C.sqfs_free(unsafe.Pointer(f.inode))
+	}
 	return ErrNotImplemented
 }
 
