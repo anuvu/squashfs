@@ -98,6 +98,10 @@ func (s *SquashFs) Walk(root string, walkFn WalkFunc) error {
 	return err
 }
 
+func (s *SquashFs) BytesUsed() uint64 {
+	return uint64(s.super.bytes_used)
+}
+
 func walk(path string, info FileInfo, walkFn WalkFunc) error {
 	if !info.IsDir() {
 		return walkFn(path, info, nil)
@@ -304,6 +308,9 @@ func Open(name string, squash *SquashFs) (*File, error) {
 func (f *File) Close() error {
 	if f.dirReader != nil {
 		C.free(unsafe.Pointer(f.dirReader))
+	}
+	if f.inode != nil {
+		C.sqfs_free(unsafe.Pointer(f.inode))
 	}
 	return ErrNotImplemented
 }
