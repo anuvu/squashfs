@@ -3,8 +3,8 @@
 _GO_VER=1.14.8
 VERBOSITY=0
 TEMP_D=""
-SQFSNG_GIT="${SQFS_NG_GIT:-https://github.com/AgentD/squashfs-tools-ng.git}"
-SQFSNG_REF="${SQFS_REF-origin/fixes-1.0.0}"
+SQFSNG_GIT="${SQFSNG_GIT:-https://github.com/AgentD/squashfs-tools-ng.git}"
+SQFSNG_REF="${SQFSNG_REF:-origin/fixes-1.0.0}"
 [ -n "$HOME" ] || export HOME=$(echo ~)
 
 error() { echo "$@" 1>&2; }
@@ -402,7 +402,7 @@ main() {
             error "failed to clone ${SQFSNG_GIT} to $squashfs_ng_d"
             return 1
         }
-        if [ -n "${SQFSNG_REF}" ]; then
+        if [ "${SQFSNG_REF}" != "UNCHANGED" ]; then
             debug 1 "checking out ${SQFSNG_REF}"
             (
                 cd "$squashfs_ng_d" || {
@@ -415,7 +415,7 @@ main() {
                 }
             ) || return
         else
-            debug 1 "SQFSNG_REF not set, leaving tree as it is."
+            debug 1 "SQFSNG_REF set to UNCHANGED. leaving tree as is."
         fi
     fi
 
