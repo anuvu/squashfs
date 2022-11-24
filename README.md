@@ -5,7 +5,7 @@ It uses the the libsquashfs C library from [squashfs-tools-ng](https://github.co
 
 It will build against 1.0.0, but the Read operations require a fix for [squashfs-tools-ng/#58](https://github.com/AgentD/squashfs-tools-ng/issues/58).
 
-There is really good doc of squashfs format at [doc/format.txt](https://github.com/AgentD/squashfs-tools-ng/blob/master/doc/format.txt)
+There is really good doc of squashfs format at [doc/format.adoc](https://github.com/AgentD/squashfs-tools-ng/blob/master/doc/format.adoc)
 
 ## Build setup
 Most of this is handled by `setup` program.  But if you want to do it on your own, the following is a summary of what `setup` will do.
