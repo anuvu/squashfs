@@ -39,3 +39,17 @@ jobs:
       run: |
         . ./.github/workflows/env
         make test
+
+    - name: Copy binaries
+      run: |
+        . ./.github/workflows/env
+        mkdir -p bin
+        cp squashtool/squashtool bin/squashtool.dynamic
+        cp squashtool/squashtool.static bin/squashtool
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: binaries
+        path: bin/
+        if-no-files-found: error
