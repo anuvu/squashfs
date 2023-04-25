@@ -53,3 +53,11 @@ jobs:
         name: binaries
         path: bin/
         if-no-files-found: error
+
+    - name: Release bin
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          bin/squashtool
+          bin/squashtool.dynamic
