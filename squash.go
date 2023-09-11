@@ -329,7 +329,7 @@ func (f *File) Name() string {
 // Read - os.File.Read
 func (f *File) Read(b []byte) (int, error) {
 	if f.dataReader == nil {
-		f.dataReader = f.SquashFs.dataReader.Copy()
+		f.dataReader = sqfsDataReaderTCopy(f.SquashFs.dataReader)
 		if f.dataReader == nil {
 			return 0, fmt.Errorf("failed to create a datareader for %s", f.Filename)
 		}
@@ -361,7 +361,7 @@ func (f *File) Size() int64 {
 }
 
 // Name - return the name entry in a sqfs_dir_entry_t struct.
-func (ent *C.sqfs_dir_entry_t) Name() string {
+func sqfsDirEntryTName(ent *C.sqfs_dir_entry_t) string {
 	// sqfs_dir_entry_t is at
 	// https://github.com/AgentD/squashfs-tools-ng/blob/master/include/sqfs/dir.h#L74
 	// but cgo can't get to ent.name - compiler gives:
@@ -373,8 +373,8 @@ func (ent *C.sqfs_dir_entry_t) Name() string {
 	return string(b[structSize:])
 }
 
-// symlinkTarget - return the target of this inode. empty string if not a link.
-func (inode *C.sqfs_inode_generic_t) symlinkTarget() string {
+// SqfsInodeGenericTSymlinkTarget - return the target of this inode. empty string if not a link.
+func sqfsInodeGenericTSymlinkTarget(inode *C.sqfs_inode_generic_t) string {
 	var dataPtr = unsafe.Pointer(&inode.data)
 	var targetSize C.int
 	structSize := C.int(C.sizeof_sqfs_inode_generic_t)
@@ -462,7 +462,7 @@ func getFileInfo(f *File) (FileInfo, error) {
 		FSize:         size,
 		FMode:         myMode,
 		File:          f,
-		SymlinkTarget: inode.symlinkTarget(),
+		SymlinkTarget: sqfsInodeGenericTSymlinkTarget(inode),
 	}
 	return fInfo, nil
 }
@@ -491,11 +491,11 @@ func (f *File) Readdir(n int) ([]os.FileInfo, error) {
 	return infos, rdErr
 }
 
-func (rd *C.sqfs_data_reader_t) Copy() *C.sqfs_data_reader_t {
+func sqfsDataReaderTCopy(rd *C.sqfs_data_reader_t) *C.sqfs_data_reader_t {
 	return (*C.sqfs_data_reader_t)(unsafe.Pointer(C.sqfs_copy(unsafe.Pointer(rd))))
 }
 
-func (rd *C.sqfs_dir_reader_t) Copy() *C.sqfs_dir_reader_t {
+func sqfsDirReaderTCopy(rd *C.sqfs_dir_reader_t) *C.sqfs_dir_reader_t {
 	return (*C.sqfs_dir_reader_t)(unsafe.Pointer(C.sqfs_copy(unsafe.Pointer(rd))))
 }
 
@@ -504,7 +504,7 @@ func (f *File) Readdirnames(n int) ([]string, error) {
 	var ent *C.sqfs_dir_entry_t
 	names := []string{}
 	if f.dirReader == nil {
-		f.dirReader = f.SquashFs.dirReader.Copy()
+		f.dirReader = sqfsDirReaderTCopy(f.SquashFs.dirReader)
 		if r := C.sqfs_dir_reader_open_dir(f.dirReader, f.inode, 0); r != 0 {
 			return names, fmt.Errorf("unexpected error %d. %s not a dir?", r, f.Name())
 		}
@@ -520,7 +520,7 @@ func (f *File) Readdirnames(n int) ([]string, error) {
 			return names, fmt.Errorf("Error while reading %s (%d)", f.Filename, r)
 		}
 
-		names = append(names, ent.Name())
+		names = append(names, sqfsDirEntryTName(ent))
 	}
 	return names, nil
 }
